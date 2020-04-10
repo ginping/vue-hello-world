@@ -1,11 +1,25 @@
 <template>
-  <div>
-    <input
-      type="file"
-      :disable="status !== Status.wait"
-      @change="handleFileChange"
-    >
-    <el-button @click="handleUpload">上传</el-button>
+  <div id="app">
+    <div>
+      <input
+        type="file"
+        :disabled="status !== Status.wait"
+        @change="handleFileChange"
+      >
+      <el-button
+        :disabled="uploadDisabled"
+        @click="handleUpload"
+      >上传</el-button>
+      <el-button
+        v-if="status === Status.pause"
+        @click="handleResume"
+      >恢复</el-button>
+      <el-button
+        v-else
+        :disabled="status !== Status.uploading || !container.hash"
+        @click="handlePause"
+      >暂停</el-button>
+    </div>
     <div>
       <div>计算文件 hash</div>
       <el-progress :percentage="hashPercentage" />
@@ -36,37 +50,34 @@
 </template>
 
 <script>
-import { ping, uploadFile, mergeFile, verifyFile } from '@/api/upload' // eslint-disable-line
-import request from '@/utils/request'
-
-const SIZE = 10 * 1024 * 1024 // 切片大小, 单位 B
+const SIZE = 10 * 1024 * 1024 // 切片大小
 const Status = {
   wait: 'wait',
   pause: 'pause',
   uploading: 'uploading'
 }
-
 export default {
+  name: 'App',
   filters: {
     transformByte(val) {
       return Number((val / 1024).toFixed(0))
     }
   },
-  data() {
-    return {
-      Status,
-      container: {
-        file: null,
-        hash: '',
-        worker: null
-      },
-      hashPercentage: 0,
-      data: [],
-      requestList: [],
-      status: Status.wait,
-      fakeUploadPercentage: 0
-    }
-  },
+  data: () => ({
+    Status,
+    container: {
+      file: null,
+      hash: '',
+      worker: null
+    },
+    hashPercentage: 0,
+    data: [],
+    requestList: [],
+    status: Status.wait,
+    // 当暂停时会取消 xhr 导致进度条后退
+    // 为了避免这种情况，需要定义一个假的进度条
+    fakeUploadPercentage: 0
+  }),
   computed: {
     uploadDisabled() {
       return (
@@ -90,7 +101,57 @@ export default {
     }
   },
   methods: {
-    // 生成切片文件
+    handlePause() {
+      this.status = Status.pause
+      this.resetData()
+    },
+    resetData() {
+      this.requestList.forEach(xhr => xhr?.abort())
+      this.requestList = []
+      if (this.container.worker) {
+        this.container.worker.onmessage = null
+      }
+    },
+    async handleResume() {
+      this.status = Status.uploading
+      const { uploadedList } = await this.verifyUpload(
+        this.container.file.name,
+        this.container.hash
+      )
+      await this.uploadChunks(uploadedList)
+    },
+    // xhr
+    request({
+      url,
+      method = 'post',
+      data,
+      headers = {},
+      onProgress = e => e,
+      requestList
+    }) {
+      return new Promise(resolve => {
+        const xhr = new XMLHttpRequest()
+        xhr.upload.onprogress = onProgress
+        xhr.open(method, url)
+        Object.keys(headers).forEach(key =>
+          xhr.setRequestHeader(key, headers[key])
+        )
+        xhr.send(data)
+        xhr.onload = e => {
+          // 将请求成功的 xhr 从列表中删除
+          if (requestList) {
+            const xhrIndex = requestList.findIndex(item => item === xhr)
+            requestList.splice(xhrIndex, 1)
+          }
+          resolve({
+            data: e.target.response
+          })
+        }
+        // 暴露当前 xhr 给外部
+        requestList?.push(xhr)
+      })
+    },
+    // 生成文件切片
     createFileChunk(file, size = SIZE) {
       const fileChunkList = []
       let cur = 0
@@ -100,7 +161,7 @@ export default {
       }
       return fileChunkList
     },
-    // 生成文件 hash (web-worker)
+    // 生成文件 hash（web-worker）
     calculateHash(fileChunkList) {
       return new Promise(resolve => {
         this.container.worker = new Worker('/hash.js')
@@ -117,6 +178,7 @@ export default {
     handleFileChange(e) {
       const [file] = e.target.files
       if (!file) return
+      this.resetData()
       Object.assign(this.$data, this.$options.data())
       this.container.file = file
     },
@@ -141,11 +203,10 @@ export default {
         chunk: file,
         size: file.size,
         percentage: uploadedList.includes(this.container.hash + '-' + index) ? 100 : 0
-      })
-      )
+      }))
       await this.uploadChunks(uploadedList)
     },
-    // 上传切片
+    // 上传切片，同时过滤已上传的切片
     async uploadChunks(uploadedList = []) {
       const requestList = this.data
         .filter(({ hash }) => !uploadedList.includes(hash))
@@ -158,25 +219,32 @@ export default {
           return { formData, index }
         })
         .map(async({ formData, index }) =>
-          request({
+          this.request({
             url: '/file/upload',
-            method: 'post',
             data: formData,
-            headers: { 'Content-Type': 'multipart/formdata' },
-            onUploadProgress: this.createProgressHandler(this.data[index])
-          }))
-      await Promise.all(requestList) // 并发切片
+            onProgress: this.createProgressHandler(this.data[index]),
+            requestList: this.requestList
+          })
+        )
+      await Promise.all(requestList)
       // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时
+      // 合并切片
       if (uploadedList.length + requestList.length === this.data.length) {
         await this.mergeRequest()
       }
     },
     // 通知服务端合并切片
     async mergeRequest() {
-      await mergeFile({
-        size: SIZE,
-        fileHash: this.container.hash,
-        filename: this.container.file.name
+      await this.request({
+        url: '/merge',
+        headers: {
+          'content-type': 'application/json'
+        },
+        data: JSON.stringify({
+          size: SIZE,
+          fileHash: this.container.hash,
+          filename: this.container.file.name
+        })
       })
       this.$message.success('上传成功')
       this.status = Status.wait
@@ -184,20 +252,23 @@ export default {
     // 根据 hash 验证文件是否曾经已经被上传过
     // 没有才进行上传
     async verifyUpload(filename, fileHash) {
-      const { data } = await verifyFile({ filename, fileHash })
-      return data
+      const { data } = await this.request({
+        url: '/verify',
+        headers: {
+          'content-type': 'application/json'
+        },
+        data: JSON.stringify({
+          filename,
+          fileHash
+        })
+      })
+      return JSON.parse(data)
     },
     // 用闭包保存每个 chunk 的进度数据
     createProgressHandler(item) {
       return e => {
         item.percentage = parseInt(String((e.loaded / e.total) * 100))
       }
-    },
-    ping() {
-      ping().then(response => {
-        const pong = response.data
-        console.log('ping', pong)
-      })
     }
   }
 }

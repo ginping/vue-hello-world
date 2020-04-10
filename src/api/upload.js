@@ -23,3 +23,11 @@ export function mergeFile(data) {
     data
   })
 }
+
+export function verifyFile(data) {
+  return request({
+    url: '/verify',
+    method: 'post',
+    data
+  })
+}
