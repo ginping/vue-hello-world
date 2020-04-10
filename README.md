@@ -2,6 +2,10 @@
 
 Vue 学习笔记
 
+## file-upload
+
+基于 flask 框架的文件上传后端
+
 ## Project setup
 ```
 npm install
