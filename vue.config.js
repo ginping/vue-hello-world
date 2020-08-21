@@ -19,13 +19,13 @@ module.exports = {
     overlay: {
       warnings: false,
       errors: true
-    },
-    proxy: {
-      '/': {
-        target: 'http://127.0.0.1:28080',
-        changeOrigin: true
-      }
     }
+    // proxy: {
+    //   '/': {
+    //     target: 'http://127.0.0.1:28080',
+    //     changeOrigin: true
+    //   }
+    // }
   },
   configureWebpack: {
     resolve: {

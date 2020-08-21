@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MyVue</title>
+  <link id='stylesheet' rel='stylesheet' href='dark.css' />
+</head>
+<body>
+  <div id="app">
+    <h1>{{ msg }}</h1>
+    <br>
+    <h2>{{ deep.b }}</h2>
+    <input v-model="deep.b">
+    <br>
+    <br>
+    <button onclick="plusOneB()">点我加一</button>
+    <button onclick="minusOneB()">点我减一</button>
+    <br>
+    <br>
+    <h2 onclick="initDeepA()">{{ deep.a }} 点我重置</h2>
+    <input v-model="deep.a">
+    <br>
+    <br>
+    <button onclick="plusOneA()">点我加一</button>
+    <button onclick="minusOneA()">点我减一</button>
+    <br>
+    <br>
+    <button onclick="double()">点我倍乘</button>
+    <button onclick="half()">点我倍除</button>
+  </div>
+</body>
+  <script type="module" src="./main.js"></script>
+</html>

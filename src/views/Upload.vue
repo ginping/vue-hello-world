@@ -7,7 +7,7 @@
     >
     <el-button @click="handleUpload">上传</el-button>
     <div>
-      <div>计算文件 hash</div>
+      <div>计算文件 hash, 乱入一个name: {{ container.arr[2].name }}</div>
       <el-progress :percentage="hashPercentage" />
       <div>总进度</div>
       <el-progress :percentage="fakeUploadPercentage" />
@@ -54,11 +54,13 @@ export default {
   },
   data() {
     return {
+      set: new Set(),
       Status,
       container: {
         file: null,
         hash: '',
-        worker: null
+        worker: null,
+        arr: [1, 2, { name: 'vue' }]
       },
       hashPercentage: 0,
       data: [],
@@ -88,6 +90,9 @@ export default {
         this.fakeUploadPercentage = now
       }
     }
+  },
+  created() {
+    console.log(this.container)
   },
   methods: {
     // 生成切片文件
@@ -121,6 +126,8 @@ export default {
       this.container.file = file
     },
     async handleUpload() {
+      this.container.arr[2].name += 'vue'
+      if (this.container.arr[2].name) return
       if (!this.container.file) return
       this.status = Status.uploading
       const fileChunkList = this.createFileChunk(this.container.file)
